@@ -1,0 +1,10 @@
+{
+    "caches": [
+        {
+            "name": "direct",
+            "size": 32768,
+            "line_size": 64,
+            "kind": "direct"
+        }
+    ]
+}

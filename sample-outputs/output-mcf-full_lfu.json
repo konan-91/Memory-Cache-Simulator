@@ -1,0 +1,10 @@
+{
+  "caches": [
+    {
+      "hits": 16046554,
+      "misses": 4306868,
+      "name": "full"
+    }
+  ],
+  "main_memory_accesses": 4306868
+}

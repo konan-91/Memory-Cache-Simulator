@@ -1,0 +1,11 @@
+{
+    "caches": [
+        {
+            "name": "2way",
+            "size": 32768,
+            "line_size": 64,
+            "kind": "2way",
+            "replacement_policy": "lfu"
+        }
+    ]
+}

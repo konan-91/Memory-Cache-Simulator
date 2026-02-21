@@ -1,0 +1,16 @@
+{
+    "caches": [
+        {
+            "name": "L1",
+            "size": 32768,
+            "line_size": 32,
+            "kind": "direct"
+        },
+        {
+            "name": "L2",
+            "size": 131072,
+            "line_size": 64,
+            "kind": "direct"
+        }
+    ]
+}

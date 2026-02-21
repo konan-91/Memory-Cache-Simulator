@@ -1,0 +1,11 @@
+{
+    "caches": [
+        {
+            "name": "full",
+            "size": 32768,
+            "line_size": 64,
+            "kind": "full",
+            "replacement_policy": "lfu"
+        }
+    ]
+}

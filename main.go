@@ -89,6 +89,58 @@ func newCache(cfg CacheConfig) *Cache {
 	}
 }
 
+// access simulates one cache access for a given memory address. Returns boolean for hit/miss
+func (c *Cache) access(addr uint64) bool {
+	c.tick++ // Timestamp for LRU
+
+	// Find which set it maps to, and the tag that identifies it within that set
+	setIndex := (addr / uint64(c.lineSize)) % uint64(c.numSets)
+	tag := addr / uint64(c.lineSize) / uint64(c.numSets)
+	// Get set from cache
+	set := c.sets[setIndex]
+
+	// Check for hit by scanning all ways in the set for a matching tag
+	for w := range set {
+		if set[w].valid && set[w].tag == tag {
+			// Hit, so update metadata for LRU/LFU & exit early
+			set[w].order = c.tick
+			set[w].freq++
+			c.hits++
+			return true
+		}
+	}
+
+	// Else cache miss...
+	c.misses++
+
+	// Check for an empty way in set to avoid eviction
+	for w := range set {
+		if !set[w].valid {
+			c.fillWay(set, w, tag, setIndex)
+			return false
+		}
+	}
+
+	// Else, evict according to replacement policy
+	victim := c.chooseVictim(set, setIndex)
+	c.fillWay(set, victim, tag, setIndex)
+	return false
+}
+
+// accessHierarchy walks through cache levels until it finds a hit or exhausts the hierarchy
+func accessHierarchy(caches []*Cache, lineAddr uint64, mainMem *int) {
+	for i, cache := range caches {
+		hit := cache.access(lineAddr)
+		if hit {
+			return
+		}
+		// If last cache, access goes to main memory
+		if i == len(caches)-1 {
+			*mainMem++
+		}
+	}
+}
+
 // simulate splits memory accesses into cacheline chunks and routes each through hierarchy
 func simulate(caches []*Cache, addr uint64, size int, mainMem *int) {
 	// L1 line size will be smallest line size, so use this value for splitting access
@@ -148,11 +200,6 @@ func processTrace(path string, caches []*Cache, mainMem *int) {
 		os.Exit(1)
 	}
 }
-
-// 1. Read the config JSON → know what caches to build
-// 2. Read the trace file line by line → get a sequence of memory accesses
-// 3. For each access, run it through the cache hierarchy
-// 4. Print the stats as JSON
 
 // Cache == entire structure at one level of hierarchy, Set == row in cache, CacheLine == container in set
 func main() {

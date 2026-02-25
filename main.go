@@ -23,6 +23,14 @@ type Config struct {
 	Caches []CacheConfig `json:"caches"`
 }
 
+// CacheLine represents one line in the cache
+type CacheLine struct {
+	valid bool
+	tag   uint64
+	freq  int // for LFU: access frequency; for LRU: last-used tick
+	order int // for LRU: last-used tick; for RR: insertion index
+}
+
 // Cache simulates one level of the cache hierarchy.
 type Cache struct {
 	sets     [][]CacheLine
@@ -36,12 +44,17 @@ type Cache struct {
 	misses   int
 }
 
-// CacheLine represents one line in the cache
-type CacheLine struct {
-	valid bool
-	tag   uint64
-	freq  int // for LFU: access frequency; for LRU: last-used tick; for RR: unused ???
-	order int // for LRU: last-used tick; for RR: insertion index (round-robin pointer lives in the set) ???
+// CacheStats holds hit/miss counts for one cache level
+type CacheStats struct {
+	Hits   int    `json:"hits"`
+	Misses int    `json:"misses"`
+	Name   string `json:"name"`
+}
+
+// SimOutput is for making JSON format output of results at end of sim
+type SimOutput struct {
+	Caches             []CacheStats `json:"caches"`
+	MainMemoryAccesses int          `json:"main_memory_accesses"`
 }
 
 // newCache constructor for Cache object
@@ -73,7 +86,7 @@ func newCache(cfg CacheConfig) *Cache {
 		policy = "rr"
 	}
 
-	// Allocate sets × ways grid of cache lines.
+	// Allocate sets × ways grid of cache lines
 	sets := make([][]CacheLine, numSets)
 	for i := range sets {
 		sets[i] = make([]CacheLine, numWays)
@@ -85,7 +98,7 @@ func newCache(cfg CacheConfig) *Cache {
 		numWays:  numWays,
 		lineSize: cfg.LineSize,
 		policy:   policy,
-		rrPtr:    make([]int, numSets), // all start at 0
+		rrPtr:    make([]int, numSets),
 	}
 }
 
@@ -165,7 +178,7 @@ func (c *Cache) access(addr uint64) bool {
 	}
 
 	// Else, evict according to replacement policy
-	victim := c.chooseVictim(set, setIndex)
+	victim := c.chooseVictim(set, int(setIndex))
 	c.fillWay(set, victim, tag, int(setIndex))
 	return false
 }
@@ -246,7 +259,7 @@ func processTrace(path string, caches []*Cache, mainMem *int) {
 
 // Cache == entire structure at one level of hierarchy, Set == row in cache, CacheLine == container in set
 func main() {
-	// Must accept 2 args, path to JSON config and path to trace file
+	// Accepts path to JSON config and path to trace file
 	if len(os.Args) != 3 {
 		fmt.Fprintf(os.Stderr, "Usage: %s <config.json> <trace.txt>\n", os.Args[0])
 		os.Exit(1)
@@ -273,11 +286,29 @@ func main() {
 	caches := make([]*Cache, len(config.Caches))
 	for i, cfg := range config.Caches {
 		caches[i] = newCache(cfg)
-		fmt.Fprintf(os.Stderr, "built cache %q: %d sets × %d ways, line=%dB, policy=%s\n",
-			cfg.Name, caches[i].numSets, caches[i].numWays, caches[i].lineSize, caches[i].policy) // Comment out later...
 	}
 
 	// Simulate traces
 	mainMem := 0
 	processTrace(tracePath, caches, &mainMem)
+
+	// Print results in JSON format to stdout
+	out := SimOutput{
+		Caches:             make([]CacheStats, len(caches)),
+		MainMemoryAccesses: mainMem,
+	}
+	for i, c := range caches {
+		out.Caches[i] = CacheStats{
+			Name:   config.Caches[i].Name,
+			Hits:   c.hits,
+			Misses: c.misses,
+		}
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(out); err != nil {
+		fmt.Fprintf(os.Stderr, "error writing output: %v\n", err)
+		os.Exit(1)
+	}
 }

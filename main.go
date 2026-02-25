@@ -27,8 +27,8 @@ type Config struct {
 type CacheLine struct {
 	valid bool
 	tag   uint64
-	freq  int // for LFU: access frequency; for LRU: last-used tick
-	order int // for LRU: last-used tick; for RR: insertion index
+	freq  int // for LFU: access frequency
+	order int // for LRU: last-used tick
 }
 
 // Cache simulates one level of the cache hierarchy.
@@ -103,7 +103,7 @@ func newCache(cfg CacheConfig) *Cache {
 }
 
 // fillWay writes a new tag into the chosen way and initialises metadata
-func (c *Cache) fillWay(set []CacheLine, way int, tag uint64, setIndex int) {
+func (c *Cache) fillWay(set []CacheLine, way int, tag uint64) {
 	set[way].valid = true
 	set[way].tag = tag
 	set[way].freq = 1
@@ -133,7 +133,7 @@ func (c *Cache) chooseVictim(set []CacheLine, setIndex int) int {
 		// Evict the way with the lowest frequency count
 		victim := 0
 		for w := 1; w < len(set); w++ {
-			// Smaller index wins ties (first seen)
+			// Smaller index wins ties
 			if set[w].freq < set[victim].freq {
 				victim = w
 			}
@@ -146,12 +146,12 @@ func (c *Cache) chooseVictim(set []CacheLine, setIndex int) int {
 }
 
 // access simulates one cache access for a given memory address. Returns boolean for hit/miss
-func (c *Cache) access(addr uint64) bool {
+func (c *Cache) access(lineNum uint64) bool {
 	c.tick++ // Timestamp for LRU
 
 	// Find which set it maps to, and the tag that identifies it within that set
-	setIndex := (addr / uint64(c.lineSize)) % uint64(c.numSets)
-	tag := addr / uint64(c.lineSize) / uint64(c.numSets)
+	setIndex := lineNum % uint64(c.numSets) // addr is now a line number
+	tag := lineNum / uint64(c.numSets)
 	// Get set from cache
 	set := c.sets[setIndex]
 
@@ -172,44 +172,40 @@ func (c *Cache) access(addr uint64) bool {
 	// Check for an empty way in set to avoid eviction
 	for w := range set {
 		if !set[w].valid {
-			c.fillWay(set, w, tag, int(setIndex))
+			c.fillWay(set, w, tag)
 			return false
 		}
 	}
 
 	// Else, evict according to replacement policy
 	victim := c.chooseVictim(set, int(setIndex))
-	c.fillWay(set, victim, tag, int(setIndex))
+	c.fillWay(set, victim, tag)
 	return false
-}
-
-// accessHierarchy walks through cache levels until it finds a hit or exhausts the hierarchy
-func accessHierarchy(caches []*Cache, lineAddr uint64, mainMem *int) {
-	for i, cache := range caches {
-		hit := cache.access(lineAddr)
-		if hit {
-			return
-		}
-		// If last cache, access goes to main memory
-		if i == len(caches)-1 {
-			*mainMem++
-		}
-	}
 }
 
 // simulate splits memory accesses into cacheline chunks and routes each through hierarchy
 func simulate(caches []*Cache, addr uint64, size int, mainMem *int) {
-	// L1 line size will be smallest line size, so use this value for splitting access
+	// L1 line size will be smallest, so we use this value for splitting
 	l1LineSize := uint64(caches[0].lineSize)
 
 	// Determine how many lines the access spans, in terms of l1LineSize
 	firstLine := addr / l1LineSize
 	lastLine := (addr + uint64(size) - 1) / l1LineSize
 
+	last := len(caches) - 1
+
 	// For each line touched by access, route through hierarchy
 	for line := firstLine; line <= lastLine; line++ {
-		lineAddr := line * l1LineSize
-		accessHierarchy(caches, lineAddr, mainMem)
+		// Walk through cache levels until hit or hierarchy exhausted
+		for i, cache := range caches {
+			if cache.access(line) {
+				break // Hit
+			}
+			// Else, access goes to main memory
+			if i == last {
+				*mainMem++
+			}
+		}
 	}
 }
 

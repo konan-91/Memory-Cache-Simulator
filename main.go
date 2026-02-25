@@ -214,13 +214,13 @@ func simulate(caches []*Cache, addr uint64, size int, mainMem *int) {
 func processTrace(path string, caches []*Cache, mainMem *int) {
 	f, err := os.Open(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error opening trace: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error opening trace: %v\n", err)
 		os.Exit(1)
 	}
 	defer f.Close()
 
-	// Large buffer to reduce syscall overhead since trace files are quite large
-	reader := bufio.NewReaderSize(f, 1<<20)
+	// Large buffer to reduce overhead since trace files are quite large
+	reader := bufio.NewReaderSize(f, 1<<20) // 1 MB
 
 	// Read trace file line by line
 	for {
@@ -233,7 +233,7 @@ func processTrace(path string, caches []*Cache, mainMem *int) {
 		}
 
 		// "All addresses in the trace files are 16-digit 64-bit hexadecimal values"
-		// So address is always at [17:33] and size is always at [36:39]
+		// Address is always at [17:33] and size is always at [36:39]
 		if len(line) < 39 {
 			continue
 		}
@@ -307,7 +307,7 @@ func main() {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(out); err != nil {
-		fmt.Fprintf(os.Stderr, "error writing output: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error writing output: %v\n", err)
 		os.Exit(1)
 	}
 }

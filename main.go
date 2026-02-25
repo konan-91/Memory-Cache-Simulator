@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 )
 
 // CacheConfig struct to hold cache configuration parameters from JSON
@@ -86,7 +85,7 @@ func newCache(cfg CacheConfig) *Cache {
 		policy = "rr"
 	}
 
-	// Allocate sets × ways grid of cache lines
+	// Make sets × ways grid of cache lines
 	sets := make([][]CacheLine, numSets)
 	for i := range sets {
 		sets[i] = make([]CacheLine, numWays)
@@ -146,12 +145,12 @@ func (c *Cache) chooseVictim(set []CacheLine, setIndex int) int {
 }
 
 // access simulates one cache access for a given memory address. Returns boolean for hit/miss
-func (c *Cache) access(lineNum uint64) bool {
+func (c *Cache) access(addr uint64) bool {
 	c.tick++ // Timestamp for LRU
 
 	// Find which set it maps to, and the tag that identifies it within that set
-	setIndex := lineNum % uint64(c.numSets) // addr is now a line number
-	tag := lineNum / uint64(c.numSets)
+	setIndex := (addr / uint64(c.lineSize)) % uint64(c.numSets)
+	tag := addr / uint64(c.lineSize) / uint64(c.numSets)
 	// Get set from cache
 	set := c.sets[setIndex]
 
@@ -196,9 +195,11 @@ func simulate(caches []*Cache, addr uint64, size int, mainMem *int) {
 
 	// For each line touched by access, route through hierarchy
 	for line := firstLine; line <= lastLine; line++ {
+		lineAddr := line * l1LineSize
+
 		// Walk through cache levels until hit or hierarchy exhausted
 		for i, cache := range caches {
-			if cache.access(line) {
+			if cache.access(lineAddr) {
 				break // Hit
 			}
 			// Else, access goes to main memory
@@ -218,38 +219,40 @@ func processTrace(path string, caches []*Cache, mainMem *int) {
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
+	// Large buffer to reduce syscall overhead since trace files are quite large
+	reader := bufio.NewReaderSize(f, 1<<20)
 
 	// Read trace file line by line
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
+	for {
+		line, err := reader.ReadString('\n')
+		if len(line) == 0 {
+			if err != nil {
+				break
+			}
 			continue
 		}
 
-		// Split trace line on whitespace
-		fields := strings.Fields(line)
+		// "All addresses in the trace files are 16-digit 64-bit hexadecimal values"
+		// So address is always at [17:33] and size is always at [36:39]
+		if len(line) < 39 {
+			continue
+		}
 
 		// Parse memory address
-		addr, err := strconv.ParseUint(fields[1], 16, 64)
+		addr, err := strconv.ParseUint(line[17:33], 16, 64)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "bad address %q: %v\n", fields[1], err)
+			fmt.Fprintf(os.Stderr, "bad address %q: %v\n", line[17:33], err)
 			continue
 		}
 
 		// Parse access size
-		size, err := strconv.Atoi(fields[3])
+		size, err := strconv.Atoi(line[36:39])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "bad size %q: %v\n", fields[3], err)
+			fmt.Fprintf(os.Stderr, "bad size %q: %v\n", line[36:39], err)
 			continue
 		}
 
 		simulate(caches, addr, size, mainMem)
-	}
-
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "scanner error: %v\n", err)
-		os.Exit(1)
 	}
 }
 

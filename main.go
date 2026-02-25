@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 )
 
 // CacheConfig struct to hold cache configuration parameters from JSON
@@ -86,6 +89,66 @@ func newCache(cfg CacheConfig) *Cache {
 	}
 }
 
+// simulate splits memory accesses into cacheline chunks and routes each through hierarchy
+func simulate(caches []*Cache, addr uint64, size int, mainMem *int) {
+	// L1 line size will be smallest line size, so use this value for splitting access
+	l1LineSize := uint64(caches[0].lineSize)
+
+	// Determine how many lines the access spans, in terms of l1LineSize
+	firstLine := addr / l1LineSize
+	lastLine := (addr + uint64(size) - 1) / l1LineSize
+
+	// For each line touched by access, route through hierarchy
+	for line := firstLine; line <= lastLine; line++ {
+		lineAddr := line * l1LineSize
+		accessHierarchy(caches, lineAddr, mainMem)
+	}
+}
+
+// processTrace opens and reads trace file, parses each line, calls simulate()
+func processTrace(path string, caches []*Cache, mainMem *int) {
+	f, err := os.Open(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error opening trace: %v\n", err)
+		os.Exit(1)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+
+	// Read trace file line by line
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		// Split trace line on whitespace
+		fields := strings.Fields(line)
+
+		// Parse memory address
+		addr, err := strconv.ParseUint(fields[1], 16, 64)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "bad address %q: %v\n", fields[1], err)
+			continue
+		}
+
+		// Parse access size
+		size, err := strconv.Atoi(fields[3])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "bad size %q: %v\n", fields[3], err)
+			continue
+		}
+
+		simulate(caches, addr, size, mainMem)
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "scanner error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 // 1. Read the config JSON → know what caches to build
 // 2. Read the trace file line by line → get a sequence of memory accesses
 // 3. For each access, run it through the cache hierarchy
@@ -124,7 +187,7 @@ func main() {
 			cfg.Name, caches[i].numSets, caches[i].numWays, caches[i].lineSize, caches[i].policy) // Comment out later...
 	}
 
-	// Simulate the
+	// Simulate traces
 	mainMem := 0
 	processTrace(tracePath, caches, &mainMem)
 }

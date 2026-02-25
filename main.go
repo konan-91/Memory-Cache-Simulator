@@ -89,6 +89,49 @@ func newCache(cfg CacheConfig) *Cache {
 	}
 }
 
+// fillWay writes a new tag into the chosen way and initialises metadata
+func (c *Cache) fillWay(set []CacheLine, way int, tag uint64, setIndex int) {
+	set[way].valid = true
+	set[way].tag = tag
+	set[way].freq = 1
+	set[way].order = c.tick
+}
+
+// chooseVictim selects which way to evict based on the replacement policy.
+func (c *Cache) chooseVictim(set []CacheLine, setIndex int) int {
+	switch c.policy {
+	case "rr":
+		// Get eviction target at round-robin pointer, then advance pointer for next time
+		victim := c.rrPtr[setIndex]
+		c.rrPtr[setIndex] = (c.rrPtr[setIndex] + 1) % c.numWays // Mod for wraparound
+		return victim
+
+	case "lru":
+		// Evict the way with the lowest order timestamp
+		victim := 0
+		for w := 1; w < len(set); w++ {
+			if set[w].order < set[victim].order {
+				victim = w
+			}
+		}
+		return victim
+
+	case "lfu":
+		// Evict the way with the lowest frequency count
+		victim := 0
+		for w := 1; w < len(set); w++ {
+			// Smaller index wins ties (first seen)
+			if set[w].freq < set[victim].freq {
+				victim = w
+			}
+		}
+		return victim
+
+	default:
+		return 0
+	}
+}
+
 // access simulates one cache access for a given memory address. Returns boolean for hit/miss
 func (c *Cache) access(addr uint64) bool {
 	c.tick++ // Timestamp for LRU
@@ -116,14 +159,14 @@ func (c *Cache) access(addr uint64) bool {
 	// Check for an empty way in set to avoid eviction
 	for w := range set {
 		if !set[w].valid {
-			c.fillWay(set, w, tag, setIndex)
+			c.fillWay(set, w, tag, int(setIndex))
 			return false
 		}
 	}
 
 	// Else, evict according to replacement policy
 	victim := c.chooseVictim(set, setIndex)
-	c.fillWay(set, victim, tag, setIndex)
+	c.fillWay(set, victim, tag, int(setIndex))
 	return false
 }
 
